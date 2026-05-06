@@ -2,12 +2,12 @@
 Roblox Limited Price Monitor
 ==============================
 Funciona com limiteds clássicos E UGC limiteds.
-Usa a API marketplace-sales (a única ainda ativa para resellers).
 """
 
 import requests
 import time
 import os
+import json
 from datetime import datetime
 
 # ============================================================
@@ -54,7 +54,8 @@ def get_resellers(collectible_id):
     try:
         r = requests.get(url, headers=get_auth_headers(), timeout=10)
         r.raise_for_status()
-        return r.json().get("data", [])
+        data = r.json()
+        return data.get("data", [])
     except Exception as e:
         print(f"[{now()}] ⚠️  Erro ao buscar revendedores: {e}", flush=True)
         return None
@@ -118,7 +119,6 @@ def main():
 
     if not collectible_id:
         print(f"[{now()}] ❌ Não foi possível obter o collectibleItemId.", flush=True)
-        print(f"[{now()}]    Verifique se ASSET_ID={ASSET_ID} está correto e o cookie é válido.", flush=True)
         return
 
     print(f"  Item:           {item_name}", flush=True)
@@ -130,9 +130,8 @@ def main():
     print("=" * 55, flush=True)
     print(f"[{now()}] 🚀 Monitoramento iniciado...\n", flush=True)
 
-    # None = estado desconhecido (primeira checagem)
-    # Assim sempre notifica se já estiver superado ao iniciar
     i_am_best_price = None
+    first_run = True
 
     while True:
         resellers = get_resellers(collectible_id)
@@ -146,22 +145,31 @@ def main():
             time.sleep(INTERVALO)
             continue
 
-        best           = resellers[0]
-        best_seller_id = str(best.get("seller", {}).get("id", ""))
-        best_seller    = best.get("seller", {}).get("name", "?")
-        best_price     = best.get("price", 0)
+        # Na primeira execução, imprime o JSON cru para debug do seller ID
+        if first_run:
+            print(f"[{now()}] 🔍 DEBUG — estrutura do 1º revendedor:", flush=True)
+            print(json.dumps(resellers[0], indent=2), flush=True)
+            first_run = False
 
-        sou_eu = (best_seller_id == SEU_USER_ID)
+        best = resellers[0]
+
+        # Tenta os campos mais comuns onde o ID pode estar
+        seller      = best.get("seller", {})
+        seller_id   = str(seller.get("id") or seller.get("userId") or seller.get("sellerId") or "")
+        seller_name = seller.get("name") or seller.get("username") or seller.get("displayName") or "?"
+        best_price  = best.get("price", 0)
+
+        print(f"[{now()}] 🔍 seller_id='{seller_id}' SEU_USER_ID='{SEU_USER_ID}' match={seller_id == SEU_USER_ID}", flush=True)
+
+        sou_eu = (seller_id == SEU_USER_ID)
 
         if sou_eu:
             print(f"[{now()}] ✅ Você é o best price — {best_price:,} R$", flush=True)
-            # Manda OK apenas se antes estava superado (não na primeira checagem)
             if i_am_best_price is False:
                 send_discord_ok(item_name, best, ASSET_ID)
             i_am_best_price = True
         else:
-            print(f"[{now()}] 🚨 SUPERADO! {best_price:,} R$ por {best_seller} (ID: {best_seller_id})", flush=True)
-            # Manda alerta se antes era best price OU se é a primeira checagem
+            print(f"[{now()}] 🚨 SUPERADO! {best_price:,} R$ por {seller_name} (ID: {seller_id})", flush=True)
             if i_am_best_price is True or i_am_best_price is None:
                 send_discord_alert(item_name, best, ASSET_ID)
             i_am_best_price = False

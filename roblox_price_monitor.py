@@ -130,7 +130,9 @@ def main():
     print("=" * 55, flush=True)
     print(f"[{now()}] 🚀 Monitoramento iniciado...\n", flush=True)
 
-    i_am_best_price = True
+    # None = estado desconhecido (primeira checagem)
+    # Assim sempre notifica se já estiver superado ao iniciar
+    i_am_best_price = None
 
     while True:
         resellers = get_resellers(collectible_id)
@@ -153,12 +155,14 @@ def main():
 
         if sou_eu:
             print(f"[{now()}] ✅ Você é o best price — {best_price:,} R$", flush=True)
-            if not i_am_best_price:
+            # Manda OK apenas se antes estava superado (não na primeira checagem)
+            if i_am_best_price is False:
                 send_discord_ok(item_name, best, ASSET_ID)
             i_am_best_price = True
         else:
             print(f"[{now()}] 🚨 SUPERADO! {best_price:,} R$ por {best_seller} (ID: {best_seller_id})", flush=True)
-            if i_am_best_price:
+            # Manda alerta se antes era best price OU se é a primeira checagem
+            if i_am_best_price is True or i_am_best_price is None:
                 send_discord_alert(item_name, best, ASSET_ID)
             i_am_best_price = False
 

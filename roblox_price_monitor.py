@@ -7,7 +7,6 @@ Funciona com limiteds clássicos E UGC limiteds.
 import requests
 import time
 import os
-import json
 from datetime import datetime
 
 # ============================================================
@@ -54,16 +53,24 @@ def get_resellers(collectible_id):
     try:
         r = requests.get(url, headers=get_auth_headers(), timeout=10)
         r.raise_for_status()
-        data = r.json()
-        return data.get("data", [])
+        return r.json().get("data", [])
     except Exception as e:
         print(f"[{now()}] ⚠️  Erro ao buscar revendedores: {e}", flush=True)
         return None
 
 
+def get_username(user_id):
+    """Busca o username pelo userId para exibir no log."""
+    try:
+        r = requests.get(f"https://users.roblox.com/v1/users/{user_id}", timeout=5)
+        return r.json().get("name", str(user_id))
+    except Exception:
+        return str(user_id)
+
+
 def send_discord_alert(item_name, best, asset_id):
     best_price       = best.get("price", "?")
-    best_seller_name = best.get("seller", {}).get("name", "Desconhecido")
+    best_seller_name = best.get("sellerName", best.get("sellerId", "Desconhecido"))
     item_url         = f"https://www.roblox.com/catalog/{asset_id}"
 
     embed = {
@@ -131,7 +138,6 @@ def main():
     print(f"[{now()}] 🚀 Monitoramento iniciado...\n", flush=True)
 
     i_am_best_price = None
-    first_run = True
 
     while True:
         resellers = get_resellers(collectible_id)
@@ -145,21 +151,11 @@ def main():
             time.sleep(INTERVALO)
             continue
 
-        # Na primeira execução, imprime o JSON cru para debug do seller ID
-        if first_run:
-            print(f"[{now()}] 🔍 DEBUG — estrutura do 1º revendedor:", flush=True)
-            print(json.dumps(resellers[0], indent=2), flush=True)
-            first_run = False
-
-        best = resellers[0]
-
-        # Tenta os campos mais comuns onde o ID pode estar
-        seller      = best.get("seller", {})
-        seller_id   = str(seller.get("id") or seller.get("userId") or seller.get("sellerId") or "")
-        seller_name = seller.get("name") or seller.get("username") or seller.get("displayName") or "?"
+        best        = resellers[0]
+        # O campo correto confirmado pelo debug é "sellerId" na raiz do objeto
+        seller_id   = str(best.get("sellerId", ""))
+        seller_name = best.get("sellerName", seller_id)
         best_price  = best.get("price", 0)
-
-        print(f"[{now()}] 🔍 seller_id='{seller_id}' SEU_USER_ID='{SEU_USER_ID}' match={seller_id == SEU_USER_ID}", flush=True)
 
         sou_eu = (seller_id == SEU_USER_ID)
 

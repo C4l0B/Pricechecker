@@ -15,7 +15,7 @@ from datetime import datetime
 # ============================================================
 
 ASSET_ID        = int(os.environ.get("ASSET_ID", "24112667"))
-SEU_USER_ID     = int(os.environ.get("SEU_USER_ID", "393034516"))
+SEU_USER_ID     = str(os.environ.get("SEU_USER_ID", "393034516"))
 SEU_USERNAME    = os.environ.get("SEU_USERNAME", "caiobfofo")
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1501422989403492473/4Z1sjcl2-BXUMsXloo1QVYGm62gODw3ROcEsF2cf_eZ-PhRFzrJf_QKDw1hITDSJbI7M")
 ROBLOSECURITY   = os.environ.get("ROBLOSECURITY", "")
@@ -36,10 +36,6 @@ def get_auth_headers():
 
 
 def get_collectible_id_and_name(asset_id):
-    """
-    Usa economy/v2 para pegar o collectibleItemId e o nome do item.
-    Funciona para clássicos e UGC limiteds.
-    """
     url = f"{ECONOMY_API}/v2/assets/{asset_id}/details"
     try:
         r = requests.get(url, headers=get_auth_headers(), timeout=10)
@@ -54,7 +50,6 @@ def get_collectible_id_and_name(asset_id):
 
 
 def get_resellers(collectible_id):
-    """Busca lista de revendedores pelo collectibleItemId."""
     url = f"{MARKETPLACE_API}/v1/item/{collectible_id}/resellers?limit=10"
     try:
         r = requests.get(url, headers=get_auth_headers(), timeout=10)
@@ -109,8 +104,9 @@ def send_discord_ok(item_name, best, asset_id):
             "username": "Roblox Price Monitor",
             "embeds": [embed]
         }, timeout=10)
-    except Exception:
-        pass
+        print(f"[{now()}] ✅ Confirmação de best price enviada ao Discord!", flush=True)
+    except Exception as e:
+        print(f"[{now()}] ❌ Falha ao enviar confirmação: {e}", flush=True)
 
 
 def main():
@@ -149,7 +145,7 @@ def main():
             continue
 
         best           = resellers[0]
-        best_seller_id = best.get("seller", {}).get("id")
+        best_seller_id = str(best.get("seller", {}).get("id", ""))
         best_seller    = best.get("seller", {}).get("name", "?")
         best_price     = best.get("price", 0)
 
@@ -161,7 +157,7 @@ def main():
                 send_discord_ok(item_name, best, ASSET_ID)
             i_am_best_price = True
         else:
-            print(f"[{now()}] 🚨 SUPERADO! {best_price:,} R$ por {best_seller}", flush=True)
+            print(f"[{now()}] 🚨 SUPERADO! {best_price:,} R$ por {best_seller} (ID: {best_seller_id})", flush=True)
             if i_am_best_price:
                 send_discord_alert(item_name, best, ASSET_ID)
             i_am_best_price = False

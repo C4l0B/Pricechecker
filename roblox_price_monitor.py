@@ -1,8 +1,8 @@
 """
-Roblox Limited Item Price Monitor
-==================================
-Monitora se você continua sendo o menor preço (best price) de um item limitado
-no catálogo do Roblox e notifica via webhook no Discord se alguém vender mais barato.
+Roblox Limited Price Monitor
+==============================
+Funciona com limiteds clássicos E UGC limiteds.
+Usa a API marketplace-sales (a única ainda ativa para resellers).
 """
 
 import requests
@@ -23,21 +23,41 @@ INTERVALO       = int(os.environ.get("INTERVALO_SEGUNDOS", "60"))
 
 # ============================================================
 
-ECONOMY_API = "https://economy.roblox.com"
-CATALOG_API = "https://catalog.roblox.com"
+ECONOMY_API     = "https://economy.roblox.com"
+MARKETPLACE_API = "https://apis.roblox.com/marketplace-sales"
 
 
 def now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def get_resellers(asset_id):
+def get_auth_headers():
+    return {"Cookie": f".ROBLOSECURITY={ROBLOSECURITY}"}
+
+
+def get_collectible_id_and_name(asset_id):
+    """
+    Usa economy/v2 para pegar o collectibleItemId e o nome do item.
+    Funciona para clássicos e UGC limiteds.
+    """
+    url = f"{ECONOMY_API}/v2/assets/{asset_id}/details"
     try:
-        r = requests.get(
-            f"{ECONOMY_API}/v1/assets/{asset_id}/resellers?limit=10",
-            cookies={".ROBLOSECURITY": ROBLOSECURITY},
-            timeout=10
-        )
+        r = requests.get(url, headers=get_auth_headers(), timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        collectible_id = data.get("CollectibleItemId")
+        item_name      = data.get("Name", f"Item #{asset_id}")
+        return collectible_id, item_name
+    except Exception as e:
+        print(f"[{now()}] ⚠️  Erro ao buscar detalhes do item: {e}", flush=True)
+        return None, f"Item #{asset_id}"
+
+
+def get_resellers(collectible_id):
+    """Busca lista de revendedores pelo collectibleItemId."""
+    url = f"{MARKETPLACE_API}/v1/item/{collectible_id}/resellers?limit=10"
+    try:
+        r = requests.get(url, headers=get_auth_headers(), timeout=10)
         r.raise_for_status()
         return r.json().get("data", [])
     except Exception as e:
@@ -45,25 +65,8 @@ def get_resellers(asset_id):
         return None
 
 
-def get_item_name(asset_id):
-    try:
-        r = requests.post(
-            f"{CATALOG_API}/v1/catalog/items/details",
-            json={"items": [{"itemType": "Asset", "id": asset_id}]},
-            cookies={".ROBLOSECURITY": ROBLOSECURITY},
-            timeout=10
-        )
-        r.raise_for_status()
-        items = r.json().get("data", [])
-        if items:
-            return items[0].get("name", f"Item #{asset_id}")
-    except Exception:
-        pass
-    return f"Item #{asset_id}"
-
-
 def send_discord_alert(item_name, best, asset_id):
-    best_price       = best["price"]
+    best_price       = best.get("price", "?")
     best_seller_name = best.get("seller", {}).get("name", "Desconhecido")
     item_url         = f"https://www.roblox.com/catalog/{asset_id}"
 
@@ -77,7 +80,6 @@ def send_discord_alert(item_name, best, asset_id):
         "color": 0xFF4444,
         "footer": {"text": f"Roblox Price Monitor • {now()}"},
     }
-
     try:
         r = requests.post(DISCORD_WEBHOOK, json={
             "username": "Roblox Price Monitor",
@@ -96,7 +98,7 @@ def send_discord_ok(item_name, best, asset_id):
     embed = {
         "title": "✅ Você é o best price novamente!",
         "description": (
-            f"**{item_name}** — seu listing de **{best['price']:,} R$** é o menor!\n\n"
+            f"**{item_name}** — seu listing de **{best.get('price', '?'):,} R$** é o menor!\n\n"
             f"[🔗 Ver no catálogo]({item_url})"
         ),
         "color": 0x44FF88,
@@ -116,20 +118,26 @@ def main():
     print("  🎮 Roblox Limited Price Monitor", flush=True)
     print("=" * 55, flush=True)
 
-    item_name = get_item_name(ASSET_ID)
+    collectible_id, item_name = get_collectible_id_and_name(ASSET_ID)
 
-    print(f"  Item:     {item_name}", flush=True)
-    print(f"  Asset ID: {ASSET_ID}", flush=True)
-    print(f"  Usuário:  {SEU_USERNAME} (ID: {SEU_USER_ID})", flush=True)
-    print(f"  Intervalo: {INTERVALO}s", flush=True)
-    print(f"  Cookie:   {'✅ definido' if ROBLOSECURITY else '❌ ausente'}", flush=True)
+    if not collectible_id:
+        print(f"[{now()}] ❌ Não foi possível obter o collectibleItemId.", flush=True)
+        print(f"[{now()}]    Verifique se ASSET_ID={ASSET_ID} está correto e o cookie é válido.", flush=True)
+        return
+
+    print(f"  Item:           {item_name}", flush=True)
+    print(f"  Asset ID:       {ASSET_ID}", flush=True)
+    print(f"  Collectible ID: {collectible_id}", flush=True)
+    print(f"  Usuário:        {SEU_USERNAME} (ID: {SEU_USER_ID})", flush=True)
+    print(f"  Intervalo:      {INTERVALO}s", flush=True)
+    print(f"  Cookie:         {'✅ definido' if ROBLOSECURITY else '❌ ausente'}", flush=True)
     print("=" * 55, flush=True)
     print(f"[{now()}] 🚀 Monitoramento iniciado...\n", flush=True)
 
     i_am_best_price = True
 
     while True:
-        resellers = get_resellers(ASSET_ID)
+        resellers = get_resellers(collectible_id)
 
         if resellers is None:
             time.sleep(INTERVALO)
@@ -143,7 +151,7 @@ def main():
         best           = resellers[0]
         best_seller_id = best.get("seller", {}).get("id")
         best_seller    = best.get("seller", {}).get("name", "?")
-        best_price     = best["price"]
+        best_price     = best.get("price", 0)
 
         sou_eu = (best_seller_id == SEU_USER_ID)
 

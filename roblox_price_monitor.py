@@ -18,6 +18,7 @@ ASSET_ID        = int(os.environ.get("ASSET_ID", "24112667"))
 SEU_USER_ID     = int(os.environ.get("SEU_USER_ID", "393034516"))
 SEU_USERNAME    = os.environ.get("SEU_USERNAME", "caiobfofo")
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1501422989403492473/4Z1sjcl2-BXUMsXloo1QVYGm62gODw3ROcEsF2cf_eZ-PhRFzrJf_QKDw1hITDSJbI7M")
+ROBLOSECURITY   = os.environ.get("ROBLOSECURITY", "")
 INTERVALO       = int(os.environ.get("INTERVALO_SEGUNDOS", "60"))
 
 # ============================================================
@@ -34,6 +35,7 @@ def get_resellers(asset_id):
     try:
         r = requests.get(
             f"{ECONOMY_API}/v1/assets/{asset_id}/resellers?limit=10",
+            cookies={".ROBLOSECURITY": ROBLOSECURITY},
             timeout=10
         )
         r.raise_for_status()
@@ -48,6 +50,7 @@ def get_item_name(asset_id):
         r = requests.post(
             f"{CATALOG_API}/v1/catalog/items/details",
             json={"items": [{"itemType": "Asset", "id": asset_id}]},
+            cookies={".ROBLOSECURITY": ROBLOSECURITY},
             timeout=10
         )
         r.raise_for_status()
@@ -119,6 +122,7 @@ def main():
     print(f"  Asset ID: {ASSET_ID}", flush=True)
     print(f"  Usuário:  {SEU_USERNAME} (ID: {SEU_USER_ID})", flush=True)
     print(f"  Intervalo: {INTERVALO}s", flush=True)
+    print(f"  Cookie:   {'✅ definido' if ROBLOSECURITY else '❌ ausente'}", flush=True)
     print("=" * 55, flush=True)
     print(f"[{now()}] 🚀 Monitoramento iniciado...\n", flush=True)
 

@@ -3,60 +3,55 @@ Roblox Limited Item Price Monitor
 ==================================
 Monitora se você continua sendo o menor preço (best price) de um item limitado
 no catálogo do Roblox e notifica via webhook no Discord se alguém vender mais barato.
-
-Como usar:
-1. pip install requests
-2. Preencha as configurações abaixo
-3. python roblox_price_monitor.py
 """
 
 import requests
 import time
-import json
+import os
 from datetime import datetime
 
 # ============================================================
-# ⚙️  CONFIGURAÇÕES — preencha aqui
+# ⚙️  CONFIGURAÇÕES (lidas das variáveis de ambiente)
 # ============================================================
 
-ASSET_ID = 0                          # ID do item no Roblox (aparece na URL do catálogo)
-SEU_USERNAME = "SeuUsernameAqui"      # Seu username do Roblox
-SEU_PRECO = 0                         # O preço que você listou o item (em Robux)
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/SEU_WEBHOOK_AQUI"
-
-# Intervalo de verificação em segundos (padrão: 60 segundos)
-INTERVALO_SEGUNDOS = 60
+ASSET_ID        = int(os.environ.get("ASSET_ID", "24112667"))
+SEU_USER_ID     = int(os.environ.get("SEU_USER_ID", "393034516"))
+SEU_USERNAME    = os.environ.get("SEU_USERNAME", "caiobfofo")
+DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1501422989403492473/4Z1sjcl2-BXUMsXloo1QVYGm62gODw3ROcEsF2cf_eZ-PhRFzrJf_QKDw1hITDSJbI7M")
+INTERVALO       = int(os.environ.get("INTERVALO_SEGUNDOS", "60"))
 
 # ============================================================
-# 🔧  Lógica do bot — não precisa alterar abaixo
-# ============================================================
 
-ROBLOX_API_BASE = "https://economy.roblox.com"
-CATALOG_API_BASE = "https://catalog.roblox.com"
+ECONOMY_API = "https://economy.roblox.com"
+CATALOG_API = "https://catalog.roblox.com"
 
 
-def get_resellers(asset_id: int) -> list[dict] | None:
-    """Busca a lista de revendedores do item."""
-    url = f"{ROBLOX_API_BASE}/v1/assets/{asset_id}/resellers?limit=10&cursor="
+def now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def get_resellers(asset_id):
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(
+            f"{ECONOMY_API}/v1/assets/{asset_id}/resellers?limit=10",
+            timeout=10
+        )
         r.raise_for_status()
-        data = r.json()
-        return data.get("data", [])
-    except requests.RequestException as e:
-        print(f"[{now()}] ⚠️  Erro ao buscar revendedores: {e}")
+        return r.json().get("data", [])
+    except Exception as e:
+        print(f"[{now()}] ⚠️  Erro ao buscar revendedores: {e}", flush=True)
         return None
 
 
-def get_item_name(asset_id: int) -> str:
-    """Busca o nome do item no catálogo."""
-    url = f"{CATALOG_API_BASE}/v1/catalog/items/details"
-    payload = {"items": [{"itemType": "Asset", "id": asset_id}]}
+def get_item_name(asset_id):
     try:
-        r = requests.post(url, json=payload, timeout=10)
+        r = requests.post(
+            f"{CATALOG_API}/v1/catalog/items/details",
+            json={"items": [{"itemType": "Asset", "id": asset_id}]},
+            timeout=10
+        )
         r.raise_for_status()
-        data = r.json()
-        items = data.get("data", [])
+        items = r.json().get("data", [])
         if items:
             return items[0].get("name", f"Item #{asset_id}")
     except Exception:
@@ -64,140 +59,102 @@ def get_item_name(asset_id: int) -> str:
     return f"Item #{asset_id}"
 
 
-def now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def send_discord_alert(item_name: str, best_seller: dict, seu_preco: int, asset_id: int):
-    """Envia uma notificação rica no Discord."""
-    best_price = best_seller["price"]
-    best_seller_name = best_seller.get("seller", {}).get("name", "Desconhecido")
-    diferenca = seu_preco - best_price
-
-    item_url = f"https://www.roblox.com/catalog/{asset_id}"
-    thumbnail_url = f"https://thumbnails.roblox.com/v1/assets?assetIds={asset_id}&size=150x150&format=Png&isCircular=false"
+def send_discord_alert(item_name, best, asset_id):
+    best_price       = best["price"]
+    best_seller_name = best.get("seller", {}).get("name", "Desconhecido")
+    item_url         = f"https://www.roblox.com/catalog/{asset_id}"
 
     embed = {
-        "title": "🚨 Você perdeu o Best Price!",
+        "title": "🚨 Alguém listou mais barato que você!",
         "description": (
-            f"Alguém listou **{item_name}** mais barato que você!\n\n"
-            f"**Menor preço atual:** R$ {best_price:,} (por **{best_seller_name}**)\n"
-            f"**Seu preço:** R$ {seu_preco:,}\n"
-            f"**Diferença:** R$ {diferenca:,} a menos\n\n"
+            f"**{item_name}** — você não é mais o best price!\n\n"
+            f"**Menor preço atual:** {best_price:,} R$ — vendido por **{best_seller_name}**\n\n"
             f"[🔗 Ver no catálogo]({item_url})"
         ),
         "color": 0xFF4444,
         "footer": {"text": f"Roblox Price Monitor • {now()}"},
-        "thumbnail": {"url": thumbnail_url},
-    }
-
-    payload = {
-        "username": "Roblox Price Monitor",
-        "avatar_url": "https://images.rbxcdn.com/8c6db9a5f82a3e16b04b8baa39bb9498",
-        "embeds": [embed],
     }
 
     try:
-        r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+        r = requests.post(DISCORD_WEBHOOK, json={
+            "username": "Roblox Price Monitor",
+            "embeds": [embed]
+        }, timeout=10)
         if r.status_code == 204:
-            print(f"[{now()}] ✅ Alerta enviado ao Discord!")
+            print(f"[{now()}] ✅ Alerta enviado ao Discord!", flush=True)
         else:
-            print(f"[{now()}] ⚠️  Discord retornou status {r.status_code}: {r.text}")
-    except requests.RequestException as e:
-        print(f"[{now()}] ❌ Falha ao enviar alerta: {e}")
+            print(f"[{now()}] ⚠️  Discord status {r.status_code}: {r.text}", flush=True)
+    except Exception as e:
+        print(f"[{now()}] ❌ Falha ao enviar alerta: {e}", flush=True)
 
 
-def send_discord_ok(item_name: str, asset_id: int, seu_preco: int):
-    """Envia notificação quando você volta a ser o best price."""
+def send_discord_ok(item_name, best, asset_id):
     item_url = f"https://www.roblox.com/catalog/{asset_id}"
     embed = {
-        "title": "✅ Você voltou a ser o Best Price!",
+        "title": "✅ Você é o best price novamente!",
         "description": (
-            f"**{item_name}** — seu preço de **R$ {seu_preco:,}** é novamente o menor!\n\n"
+            f"**{item_name}** — seu listing de **{best['price']:,} R$** é o menor!\n\n"
             f"[🔗 Ver no catálogo]({item_url})"
         ),
         "color": 0x44FF88,
         "footer": {"text": f"Roblox Price Monitor • {now()}"},
     }
-    payload = {"username": "Roblox Price Monitor", "embeds": [embed]}
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+        requests.post(DISCORD_WEBHOOK, json={
+            "username": "Roblox Price Monitor",
+            "embeds": [embed]
+        }, timeout=10)
     except Exception:
         pass
 
 
-def validate_config():
-    """Valida as configurações antes de iniciar."""
-    errors = []
-    if ASSET_ID == 0:
-        errors.append("ASSET_ID não foi definido.")
-    if SEU_USERNAME == "SeuUsernameAqui":
-        errors.append("SEU_USERNAME não foi preenchido.")
-    if SEU_PRECO == 0:
-        errors.append("SEU_PRECO não foi definido.")
-    if "SEU_WEBHOOK_AQUI" in DISCORD_WEBHOOK_URL:
-        errors.append("DISCORD_WEBHOOK_URL não foi configurado.")
-    if errors:
-        print("❌ Erros de configuração:")
-        for e in errors:
-            print(f"   • {e}")
-        print("\nEdite as variáveis na seção CONFIGURAÇÕES e tente novamente.")
-        exit(1)
-
-
 def main():
-    validate_config()
-
-    print("=" * 55)
-    print("  🎮 Roblox Limited Price Monitor")
-    print("=" * 55)
+    print("=" * 55, flush=True)
+    print("  🎮 Roblox Limited Price Monitor", flush=True)
+    print("=" * 55, flush=True)
 
     item_name = get_item_name(ASSET_ID)
-    print(f"  Item:      {item_name}")
-    print(f"  Asset ID:  {ASSET_ID}")
-    print(f"  Usuário:   {SEU_USERNAME}")
-    print(f"  Seu preço: R$ {SEU_PRECO:,}")
-    print(f"  Intervalo: {INTERVALO_SEGUNDOS}s")
-    print("=" * 55)
-    print(f"[{now()}] 🚀 Monitoramento iniciado...\n")
 
-    was_best_price = True  # Assume que começa como best price
+    print(f"  Item:     {item_name}", flush=True)
+    print(f"  Asset ID: {ASSET_ID}", flush=True)
+    print(f"  Usuário:  {SEU_USERNAME} (ID: {SEU_USER_ID})", flush=True)
+    print(f"  Intervalo: {INTERVALO}s", flush=True)
+    print("=" * 55, flush=True)
+    print(f"[{now()}] 🚀 Monitoramento iniciado...\n", flush=True)
+
+    i_am_best_price = True
 
     while True:
         resellers = get_resellers(ASSET_ID)
 
         if resellers is None:
-            # Erro na API, tenta novamente no próximo ciclo
-            time.sleep(INTERVALO_SEGUNDOS)
+            time.sleep(INTERVALO)
             continue
 
         if not resellers:
-            print(f"[{now()}] ℹ️  Nenhum revendedor encontrado (item pode estar fora de venda).")
-            time.sleep(INTERVALO_SEGUNDOS)
+            print(f"[{now()}] ℹ️  Nenhum revendedor encontrado.", flush=True)
+            time.sleep(INTERVALO)
             continue
 
-        # O primeiro da lista é sempre o menor preço
-        best = resellers[0]
-        best_price = best["price"]
-        best_seller_name = best.get("seller", {}).get("name", "?")
+        best           = resellers[0]
+        best_seller_id = best.get("seller", {}).get("id")
+        best_seller    = best.get("seller", {}).get("name", "?")
+        best_price     = best["price"]
 
-        is_best_price = best_price >= SEU_PRECO
+        sou_eu = (best_seller_id == SEU_USER_ID)
 
-        if is_best_price:
-            status = "✅ Você é o best price"
-            if not was_best_price:
-                # Voltou a ser best price — notifica o Discord
-                send_discord_ok(item_name, ASSET_ID, SEU_PRECO)
+        if sou_eu:
+            print(f"[{now()}] ✅ Você é o best price — {best_price:,} R$", flush=True)
+            if not i_am_best_price:
+                send_discord_ok(item_name, best, ASSET_ID)
+            i_am_best_price = True
         else:
-            status = f"🚨 SUPERADO! Menor: R${best_price:,} por {best_seller_name}"
-            if was_best_price:
-                # Acabou de perder o best price — notifica imediatamente
-                send_discord_alert(item_name, best, SEU_PRECO, ASSET_ID)
+            print(f"[{now()}] 🚨 SUPERADO! {best_price:,} R$ por {best_seller}", flush=True)
+            if i_am_best_price:
+                send_discord_alert(item_name, best, ASSET_ID)
+            i_am_best_price = False
 
-        print(f"[{now()}] {status}")
-        was_best_price = is_best_price
-
-        time.sleep(INTERVALO_SEGUNDOS)
+        time.sleep(INTERVALO)
 
 
 if __name__ == "__main__":
